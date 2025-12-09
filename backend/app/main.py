@@ -6,36 +6,28 @@ import numpy as np
 
 from .services.analysis_service import analyze_frame
 
-# You can edit title/description later if you want
-app = FastAPI(
-    title="PhotoMentor AI Backend",
-    description="AI-powered real-time photography mentor backend",
-    version="1.0.0",
-)
+app = FastAPI()
 
-# ----------------------------------------------------
-# CORS: allow local dev + any HTTPS frontend (Render)
-# ----------------------------------------------------
+# ---- CORS: allow localhost + your Vercel app + Vercel previews ----
+origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://photo-mentor-ai-six.vercel.app",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    # For now allow all origins so Render static site can call this.
-    # Later you can restrict to your frontend URL, e.g.:
-    # allow_origins=["https://photo-mentor-frontend.onrender.com"]
-    allow_origins=["*"],
+    allow_origins=origins,
+    # allow all preview branches like https://photo-mentor-ai-six-xxxxx.vercel.app
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-# ----------------------------------------------------
-# Root / health endpoints
-# ----------------------------------------------------
+# ---- Health / root ----
 @app.get("/")
 def root():
-    """
-    Simple root route so Render's HEAD / check doesn't return 404.
-    """
     return {
         "status": "ok",
         "service": "PhotoMentorAI backend running",
@@ -45,40 +37,36 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "service": "PhotoMentorAI backend running",
+        "message": "Backend is healthy!",
+    }
 
 
-# ----------------------------------------------------
-# Main AI endpoint: /analyze_frame
-# ----------------------------------------------------
+# ---- Frame analysis endpoint ----
 @app.post("/analyze_frame")
 def analyze(payload: dict = Body(...)):
     """
     Accepts JSON with:
       { "image_base64": "data:image/jpeg;base64,..." }
-
-    Decodes the image, converts to OpenCV BGR frame,
-    then passes it into analyze_frame() in analysis_service.
     """
     try:
         image_b64 = payload.get("image_base64") or payload.get("image")
         if not image_b64:
             raise ValueError("Missing 'image_base64' or 'image' in payload")
 
-        # Strip header "data:image/jpeg;base64," if present
+        # Strip header "data:image/jpeg;base64,..." if present
         b64 = image_b64.split(",")[-1]
         img_bytes = base64.b64decode(b64)
         nparr = np.frombuffer(img_bytes, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-        if frame is None:
-            raise ValueError("Could not decode image data")
-
         result = analyze_frame(frame)
         return result
 
     except Exception as e:
-        # Safe fallback so frontend UI keeps working even on error
+        # Safe fallback payload so frontend doesn't crash
         return {
             "brightness": 0.0,
             "exposure_hint": f"Error: {e}",
