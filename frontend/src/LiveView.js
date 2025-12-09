@@ -5,7 +5,7 @@ import React, {
     useCallback,
   } from "react";
   
-  const BACKEND_URL = "http://localhost:8000/analyze_frame";
+  const BACKEND_URL = "https://photo-mentor-ai.onrender.com/analyze_frame";
   
   function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
