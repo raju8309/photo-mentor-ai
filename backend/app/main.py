@@ -6,20 +6,41 @@ import numpy as np
 
 from .services.analysis_service import analyze_frame
 
-app = FastAPI()
+# You can edit title/description later if you want
+app = FastAPI(
+    title="PhotoMentor AI Backend",
+    description="AI-powered real-time photography mentor backend",
+    version="1.0.0",
+)
 
-origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
-
+# ----------------------------------------------------
+# CORS: allow local dev + any HTTPS frontend (Render)
+# ----------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    # For now allow all origins so Render static site can call this.
+    # Later you can restrict to your frontend URL, e.g.:
+    # allow_origins=["https://photo-mentor-frontend.onrender.com"]
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ----------------------------------------------------
+# Root / health endpoints
+# ----------------------------------------------------
+@app.get("/")
+def root():
+    """
+    Simple root route so Render's HEAD / check doesn't return 404.
+    """
+    return {
+        "status": "ok",
+        "service": "PhotoMentorAI backend running",
+        "message": "Backend is healthy!",
+    }
 
 
 @app.get("/health")
@@ -27,11 +48,17 @@ def health():
     return {"status": "ok"}
 
 
+# ----------------------------------------------------
+# Main AI endpoint: /analyze_frame
+# ----------------------------------------------------
 @app.post("/analyze_frame")
 def analyze(payload: dict = Body(...)):
     """
     Accepts JSON with:
       { "image_base64": "data:image/jpeg;base64,..." }
+
+    Decodes the image, converts to OpenCV BGR frame,
+    then passes it into analyze_frame() in analysis_service.
     """
     try:
         image_b64 = payload.get("image_base64") or payload.get("image")
@@ -44,10 +71,14 @@ def analyze(payload: dict = Body(...)):
         nparr = np.frombuffer(img_bytes, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
+        if frame is None:
+            raise ValueError("Could not decode image data")
+
         result = analyze_frame(frame)
         return result
 
     except Exception as e:
+        # Safe fallback so frontend UI keeps working even on error
         return {
             "brightness": 0.0,
             "exposure_hint": f"Error: {e}",
