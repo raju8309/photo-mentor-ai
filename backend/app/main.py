@@ -8,7 +8,7 @@ from .services.analysis_service import analyze_frame
 
 app = FastAPI()
 
-# ---- CORS: allow localhost + your Vercel app + Vercel previews ----
+# ---- CORS: localhost + Vercel production + Vercel previews ----
 origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -18,14 +18,13 @@ origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    # allow all preview branches like https://photo-mentor-ai-six-xxxxx.vercel.app
     allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ---- Health / root ----
+
 @app.get("/")
 def root():
     return {
@@ -44,7 +43,6 @@ def health():
     }
 
 
-# ---- Frame analysis endpoint ----
 @app.post("/analyze_frame")
 def analyze(payload: dict = Body(...)):
     """
@@ -62,18 +60,27 @@ def analyze(payload: dict = Body(...)):
         nparr = np.frombuffer(img_bytes, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
+        if frame is None:
+            raise ValueError("cv2.imdecode returned None (invalid image data)")
+
         result = analyze_frame(frame)
         return result
 
     except Exception as e:
-        # Safe fallback payload so frontend doesn't crash
+        # Print to server logs for Render debugging
+        print("[analyze_frame] ERROR:", repr(e))
+
+        # Return the error text in the hints so we can see it in the UI
+        error_text = f"Error: {e}"
+
         return {
             "brightness": 0.0,
-            "exposure_hint": f"Error: {e}",
-            "face_hint": "Error processing frame.",
-            "composition_hint": "Error processing frame.",
+            "exposure_hint": error_text,          # shows up under ACTION if timing_hint is empty
+            "face_hint": error_text,              # focus card
+            "composition_hint": error_text,       # composition card
             "num_faces": 0,
-            "timing_hint": "Error processing frame.",
+            # leave timing_hint empty so frontend displays exposure_hint instead
+            "timing_hint": "",
             "timing_score": 0,
             "expression_label": "no_face",
             "expression_confidence": 0,
