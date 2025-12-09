@@ -1,0 +1,14 @@
+
+# Python venv
+backend/ai-photo-mentor-tf-env/
+
+# Node modules
+frontend/node_modules/
+
+# Python cache
+**/__pycache__/
+*.pyc
+
+# VS Code / OS junk
+.vscode/
+.DS_Store
