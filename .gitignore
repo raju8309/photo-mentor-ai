@@ -12,3 +12,4 @@ frontend/node_modules/
 # VS Code / OS junk
 .vscode/
 .DS_Store
+.env

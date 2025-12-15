@@ -1,0 +1,52 @@
+name: PhotoMentorAI CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend-ci:
+    name: Backend CI (FastAPI)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run backend health check
+        run: |
+          cd backend
+          python -c "import app.main"
+
+  frontend-ci:
+    name: Frontend CI (React)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm run build
