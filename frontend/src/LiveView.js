@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 
-const BACKEND_URL = "https://photo-mentor-ai.onrender.com/analyze_frame";
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "https://photo-mentor-ai.onrender.com/analyze_frame";
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));

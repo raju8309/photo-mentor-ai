@@ -5,15 +5,13 @@ from .config import ALLOWED_ORIGINS
 import base64
 import cv2
 import numpy as np
+import os
 
 from .services.analysis_service import analyze_frame
 
 app = FastAPI()
 
-origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
+origins = ALLOWED_ORIGINS
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,6 +36,11 @@ def health():
         "service": "PhotoMentorAI backend",
         "environment": os.getenv("ENV", "development")
     }
+
+
+@app.options("/analyze_frame")
+def analyze_frame_preflight():
+    return Response(status_code=204)
 
 @app.post("/analyze_frame")
 def analyze(payload: dict = Body(...)):
