@@ -22,50 +22,165 @@ if eye_cascade.empty():
 # ----------------- Face helpers -------------------------
 
 
+def validate_face_region(gray: np.ndarray, face_box: Tuple[int, int, int, int]) -> bool:
+    """
+    Additional validation to check if a detected region is likely a face.
+    Uses basic heuristics about face regions.
+    """
+    x, y, w, h = face_box
+    
+    # Check if region is within image bounds
+    h_img, w_img = gray.shape
+    if x < 0 or y < 0 or x + w >= w_img or y + h >= h_img:
+        return False
+    
+    # Extract face region
+    face_region = gray[y:y+h, x:x+w]
+    
+    if face_region.size == 0:
+        return False
+    
+    # Check for reasonable variance (faces should have texture)
+    variance = face_region.var()
+    if variance < 100:  # Too uniform, likely not a face
+        return False
+    
+    # Check edge density (faces should have reasonable edge content)
+    edges = cv2.Canny(face_region, 50, 150)
+    edge_density = np.sum(edges > 0) / (w * h)
+    if edge_density < 0.02:  # Too few edges
+        return False
+    
+    return True
+
+
 def detect_faces_robust(gray: np.ndarray) -> List[Tuple[int, int, int, int]]:
     """
-    More robust face detector:
-    1) Try on resized image with normal settings
-    2) If nothing found, retry with looser parameters
+    Much more robust face detector with multiple strategies:
+    1) Histogram equalization for better contrast
+    2) Multiple detection attempts with different parameters
+    3) Different image scales
+    4) Face filtering based on aspect ratio and size
     """
     h, w = gray.shape[:2]
-
+    
+    # Apply histogram equalization for better contrast
+    gray_eq = cv2.equalizeHist(gray)
+    
+    all_faces = []
+    
+    # Strategy 1: Normal detection on equalized image
+    for scale_factor in [1.05, 1.1, 1.15]:
+        for min_neighbors in [3, 4, 5]:
+            for min_size in [(30, 30), (40, 40), (50, 50)]:
+                faces = face_cascade.detectMultiScale(
+                    gray_eq,
+                    scaleFactor=scale_factor,
+                    minNeighbors=min_neighbors,
+                    minSize=min_size,
+                    flags=cv2.CASCADE_SCALE_IMAGE
+                )
+                all_faces.extend(faces)
+    
+    # Strategy 2: Detection on resized images
     max_side = max(w, h)
-    scale = 1.0
-    if max_side > 640:
-        scale = 640.0 / max_side
-        new_size = (int(w * scale), int(h * scale))
-        resized = cv2.resize(gray, new_size, interpolation=cv2.INTER_AREA)
-    else:
-        resized = gray
-
-    faces_small = face_cascade.detectMultiScale(
-        resized,
-        scaleFactor=1.1,
-        minNeighbors=5,
-        minSize=(40, 40),
-    )
-
-    faces: List[Tuple[int, int, int, int]] = []
-    for (x, y, fw, fh) in faces_small:
-        x_o = int(x / scale)
-        y_o = int(y / scale)
-        fw_o = int(fw / scale)
-        fh_o = int(fh / scale)
-        faces.append((x_o, y_o, fw_o, fh_o))
-
-    # Fallback if nothing detected
-    if len(faces) == 0:
-        faces_fallback = face_cascade.detectMultiScale(
-            gray,
-            scaleFactor=1.05,
-            minNeighbors=3,
-            minSize=(30, 30),
+    scales_to_try = [0.8, 1.0, 1.2] if max_side > 800 else [0.7, 1.0, 1.3]
+    
+    for scale in scales_to_try:
+        if scale == 1.0:
+            gray_scaled = gray_eq
+        else:
+            new_w = max(1, int(w * scale))
+            new_h = max(1, int(h * scale))
+            if new_w > 0 and new_h > 0:
+                gray_scaled = cv2.resize(gray_eq, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+            else:
+                gray_scaled = gray_eq
+        
+        faces = face_cascade.detectMultiScale(
+            gray_scaled,
+            scaleFactor=1.1,
+            minNeighbors=4,
+            minSize=(35, 35),
+            flags=cv2.CASCADE_SCALE_IMAGE
         )
-        for (x, y, fw, fh) in faces_fallback:
-            faces.append((x, y, fw, fh))
+        
+        # Scale coordinates back to original image size
+        if scale != 1.0:
+            faces = [(int(x/scale), int(y/scale), int(w/scale), int(h/scale)) for (x, y, w, h) in faces]
+        
+        all_faces.extend(faces)
+    
+    # Strategy 3: Very relaxed parameters as last resort
+    if len(all_faces) == 0:
+        faces_relaxed = face_cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.03,
+            minNeighbors=2,
+            minSize=(20, 20),
+            flags=cv2.CASCADE_SCALE_IMAGE
+        )
+        all_faces.extend(faces_relaxed)
+    
+    # Filter and merge overlapping faces
+    if not all_faces:
+        return []
+    
+    # Remove obvious false positives based on aspect ratio and validate regions
+    valid_faces = []
+    for (x, y, w, h) in all_faces:
+        aspect_ratio = w / h
+        # Face aspect ratio is typically between 0.7 and 1.5
+        if 0.6 <= aspect_ratio <= 1.6 and w >= 20 and h >= 20:
+            # Additional validation
+            if validate_face_region(gray, (x, y, w, h)):
+                valid_faces.append((x, y, w, h))
+    
+    # Merge overlapping faces (keep the largest one in each region)
+    if not valid_faces:
+        return []
+    
+    merged_faces = []
+    for face in valid_faces:
+        is_duplicate = False
+        for existing in merged_faces:
+            # Check if faces overlap significantly
+            overlap_ratio = calculate_overlap_ratio(face, existing)
+            if overlap_ratio > 0.3:  # 30% overlap threshold
+                # Keep the larger face
+                if face[2] * face[3] > existing[2] * existing[3]:
+                    merged_faces.remove(existing)
+                    merged_faces.append(face)
+                is_duplicate = True
+                break
+        if not is_duplicate:
+            merged_faces.append(face)
+    
+    return merged_faces
 
-    return faces
+
+def calculate_overlap_ratio(face1: Tuple[int, int, int, int], face2: Tuple[int, int, int, int]) -> float:
+    """
+    Calculate the overlap ratio between two face rectangles.
+    """
+    x1, y1, w1, h1 = face1
+    x2, y2, w2, h2 = face2
+    
+    # Calculate intersection
+    x_left = max(x1, x2)
+    y_top = max(y1, y2)
+    x_right = min(x1 + w1, x2 + w2)
+    y_bottom = min(y1 + h1, y2 + h2)
+    
+    if x_right <= x_left or y_bottom <= y_top:
+        return 0.0
+    
+    intersection_area = (x_right - x_left) * (y_bottom - y_top)
+    area1 = w1 * h1
+    area2 = w2 * h2
+    union_area = area1 + area2 - intersection_area
+    
+    return intersection_area / union_area if union_area > 0 else 0.0
 
 
 # ----------------- Main analysis -------------------------
@@ -88,7 +203,7 @@ def analyze_frame(frame: np.ndarray) -> Dict[str, Any]:
       - faces: list of per-face dicts with emotion for multi-person scenes
     """
     try:
-        if frame is None:
+        if frame is None or frame.size == 0:
             return {
                 "brightness": 0.0,
                 "exposure_hint": "No frame received.",
@@ -103,6 +218,20 @@ def analyze_frame(frame: np.ndarray) -> Dict[str, Any]:
             }
 
         h, w, _ = frame.shape
+        if h <= 0 or w <= 0:
+            return {
+                "brightness": 0.0,
+                "exposure_hint": "Invalid frame dimensions.",
+                "face_hint": "Invalid frame dimensions.",
+                "composition_hint": "Invalid frame dimensions.",
+                "num_faces": 0,
+                "timing_hint": "Invalid frame dimensions.",
+                "timing_score": 0,
+                "expression_label": "no_face",
+                "expression_confidence": 0,
+                "faces": [],
+            }
+            
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         # ----- Brightness / exposure -----
@@ -118,6 +247,12 @@ def analyze_frame(frame: np.ndarray) -> Dict[str, Any]:
         # ----- Face detection (multi-face) -----
         raw_faces = detect_faces_robust(gray)
         num_faces = int(len(raw_faces))
+        
+        # Debug logging
+        if num_faces > 0:
+            print(f"[face_detection] Found {num_faces} face(s): {raw_faces}")
+        else:
+            print("[face_detection] No faces detected")
 
         face_hint = ""
         composition_hint = ""

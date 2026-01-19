@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "https://photo-mentor-ai.onrender.com/analyze_frame";
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "http://localhost:8000/analyze_frame";
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -242,6 +242,7 @@ function LiveView() {
 
       inFlightRef.current = true;
       try {
+        console.log('Sending frame to backend:', BACKEND_URL);
         const res = await fetch(BACKEND_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -249,7 +250,9 @@ function LiveView() {
           signal: controller.signal,
         });
 
+        console.log('Backend response status:', res.status);
         const json = await res.json();
+        console.log('Backend response:', json);
         setHints((prev) => ({
           ...prev,
           ...json,
